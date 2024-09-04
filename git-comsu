@@ -9,14 +9,43 @@ YELLOW='\033[1;33m'
 IYELLOW='\033[0;93m'
 NC='\033[0m' # No Color
 
-# Check if the API key environment variable is set
-if [[ -z "$GOOGLE_AI_STUDIO_API_KEY" ]]; then
-    echo -e "${YELLOW}Error: The GOOGLE_AI_STUDIO_API_KEY environment variable is not set.${NC}"
-    exit 1
-fi
+CURL_REQUEST_OPTIONS=""
+GITCOMSU_AI_PROVIDER="${GITCOMSU_AI_PROVIDER:-GEMNI}"
 
-# URL of the Google Generative AI API endpoint
-API_URL="https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=$GOOGLE_AI_STUDIO_API_KEY"
+case "${GITCOMSU_AI_PROVIDER:-GEMNI}" in
+    GOOGLE|GEMNI)
+        API_KEY="$GOOGLE_AI_STUDIO_API_KEY"
+
+        # Check if the API key environment variable is set
+        if [[ -z "$API_KEY" ]]; then
+            echo -e "${YELLOW}Error: The GOOGLE_AI_STUDIO_API_KEY environment variable is not set.${NC}"
+            exit 1
+        fi
+
+        API_MODEL="${GEMNI_API_MODEL:-gemini-1.5-flash-latest}"
+        # URL of the Google Generative AI API endpoint
+        API_URL="https://generativelanguage.googleapis.com/v1beta/models/${API_MODEL}:generateContent?key=${API_KEY}"
+        CURL_REQUEST_OPTIONS=""
+        PAYLOAD_PATTERN='{"contents":[{"parts":[{"text":$text}]}]}'
+        RESPONSE_KEY='.candidates[0].content.parts[0].text'
+    ;;
+    CHATGPT|OPENAI)
+        API_KEY="$OPENAI_API_KEY"
+        API_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+
+        # Check if the API key environment variable is set
+        if [[ -z "$API_KEY" ]]; then
+            echo -e "${YELLOW}Error: The OPEN_AI_API_KEY environment variable is not set.${NC}"
+            exit 1
+        fi
+
+        API_URL="https://api.openai.com/v1/chat/completions"
+        CURL_REQUEST_OPTIONS=" -H \"Authorization: Bearer ${API_KEY}\""
+        PAYLOAD_PATTERN="{\"model\": \"${API_MODEL}\", \"messages\": [{\"role\": \"user\", \"content\": \"\$text\"}],\"temperature\": 0.7 }"
+        RESPONSE_KEY='.choices[0].message.content'
+    ;;
+
+esac
 
 # Function to get the staged changes from Git
 get_staged_changes() {
@@ -24,8 +53,11 @@ get_staged_changes() {
     changes=$(git diff --cached)
 
     # Clean up changes: remove newlines and escape double quotes
-    clean_changes=$(echo "$changes" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/"/\\"/g' | sed "s/'/\\'/g")
-
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        clean_changes=$(echo "$changes" | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/ /g' | sed 's/["'\''\\]/\\&/g')
+    else
+        clean_changes=$(echo "$changes" | sed ':a;N;$!ba;s/\n/ /g' | sed 's/["'\''\\]/\\&/g')
+    fi
     echo "$clean_changes"
 }
 
@@ -47,16 +79,19 @@ generate_commit_messages() {
     prompt="${prompt_template} Changes: $changes"
 
     # Prepare the JSON payload using the cleaned-up prompt
-    json_payload=$(jq -n --arg text "$prompt" '{"contents":[{"parts":[{"text":$text}]}]}')
+    echo "generate_commit_message line 84"
+    json_payload=$(jq -n --arg text "$prompt" "${PAYLOAD_PATTERN:-\$text}")
 
     # Make a request to the Google Generative AI API using curl
-    response=$(curl -s \
+    response=$(curl -s $CURL_REQUEST_OPTIONS  \
       -H "Content-Type: application/json" \
       -d "$json_payload" \
       -X POST "$API_URL")
 
+
     # Extract and print the response text using jq
-    suggested_messages=$(echo "$response" | jq -r '.candidates[0].content.parts[0].text' | sed "s/\"/'/g" | sed 's/`//g' | sed 's/- //g' )
+    echo echo "generate_commit_message lin 95"
+    suggested_messages=$(echo "$response" | jq -r "$RESPONSE_KEY" | sed "s/\"/'/g" | sed 's/`//g' | sed 's/- //g' )
     echo "$suggested_messages"
 }
 
