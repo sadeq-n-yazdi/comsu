@@ -79,7 +79,6 @@ generate_commit_messages() {
     prompt="${prompt_template} Changes: $changes"
 
     # Prepare the JSON payload using the cleaned-up prompt
-    echo "generate_commit_message line 84"
     json_payload=$(jq -n --arg text "$prompt" "${PAYLOAD_PATTERN:-\$text}")
 
     # Make a request to the Google Generative AI API using curl
@@ -90,7 +89,6 @@ generate_commit_messages() {
 
 
     # Extract and print the response text using jq
-    echo echo "generate_commit_message lin 95"
     suggested_messages=$(echo "$response" | jq -r "$RESPONSE_KEY" | sed "s/\"/'/g" | sed 's/`//g' | sed 's/- //g' )
     echo "$suggested_messages"
 }
@@ -98,7 +96,7 @@ generate_commit_messages() {
 # Function to prompt the user for their choice and commit the changes
 commit_message() {
     local messages=("$@")
-    
+
     # Display the messages with numbered options
     for i in "${!messages[@]}"; do
         echo -e "${IYELLOW}$((i+1)). ${messages[i]}${NC}"
